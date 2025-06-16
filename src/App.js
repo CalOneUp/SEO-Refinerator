@@ -386,7 +386,7 @@ const App = () => {
         setIsProcessing(true);
         setError(null);
         // Updated callGemini to pass generationConfig in an options object
-        const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "STRING" } }, opportunityPages: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
+        const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
         try {
             const summaryPrompt = `Analyze the provided Google Search Console data. From the data, calculate the total impressions, total clicks, and the average CTR (as a percentage string, e.g., '2.51%'). Identify 2-3 key insights and 2-3 actionable recommendations. Also, identify up to 5 pages with high impressions but low CTR that represent good optimization opportunities, providing a short reason for each. Provide the entire response in the specified JSON format. Data sample: ${JSON.stringify(activeSnapshot.pages.slice(0, 100))}`;
             const summaryJsonString = await callGemini(summaryPrompt, { generationConfig: { responseMimeType: "application/json", responseSchema: schema } });
@@ -489,24 +489,104 @@ const App = () => {
         setSortConfig({ key, direction });
     };
 
-    const SettingsModal = ({ isOpen, onClose, currentApiKey, onSave }) => {
+    // MODIFIED SettingsModal to include Knowledge Base tab
+    const SettingsModal = ({ isOpen, onClose, currentApiKey, onSave,
+        knowledgeBaseItems, handleKnowledgeBaseFileUpload, isUploadingKnowledgeBase,
+        successMessage, error // Pass success and error for modal internal display
+    }) => {
         const [key, setKey] = useState('');
-        useEffect(() => { if(isOpen) setKey(currentApiKey || '') }, [isOpen, currentApiKey]);
+        const [activeTab, setActiveTab] = useState('api'); // 'api' or 'knowledgeBase'
+
+        useEffect(() => { 
+            if(isOpen) {
+                setKey(currentApiKey || '');
+                // Reset errors/success when modal opens or tab changes
+                // If you want separate error states, you'd manage them differently.
+            }
+        }, [isOpen, currentApiKey]); // Removed activeTab from dependency array to not clear state on tab change
+
         if (!isOpen) return null;
+
         return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
                 <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
                     <h2 className="text-xl font-bold mb-4">Settings</h2>
-                    <div className="mb-4">
-                        <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="apiKey">Gemini API Key</label>
-                        <input id="apiKey" type="password" value={key} onChange={e => setKey(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter your API key"/>
-                        <p className="text-xs text-slate-500 mt-1">Your key is stored securely and only used for your requests.</p>
+                    
+                    {/* Tabs for settings */}
+                    <div className="flex border-b border-slate-200 mb-4">
+                        <button
+                            className={`px-4 py-2 text-sm font-medium ${activeTab === 'api' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            onClick={() => setActiveTab('api')}
+                        >
+                            API Settings
+                        </button>
+                        <button
+                            className={`px-4 py-2 text-sm font-medium ${activeTab === 'knowledgeBase' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            onClick={() => setActiveTab('knowledgeBase')}
+                        >
+                            Knowledge Base
+                        </button>
                     </div>
-                    <div className="flex justify-end gap-2"><button onClick={onClose} className="py-2 px-4 rounded">Cancel</button><button onClick={() => { onSave(key); onClose(); }} className="py-2 px-4 bg-blue-600 text-white rounded">Save</button></div>
+
+                    {/* Content based on active tab */}
+                    {activeTab === 'api' && (
+                        <>
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="apiKey">Gemini API Key</label>
+                                <input id="apiKey" type="password" value={key} onChange={e => setKey(e.target.value)} className="w-full p-2 border rounded" placeholder="Enter your API key"/>
+                                <p className="text-xs text-slate-500 mt-1">Your key is stored securely and only used for your requests.</p>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={onClose} className="py-2 px-4 rounded">Cancel</button>
+                                <button onClick={() => { onSave(key); onClose(); }} className="py-2 px-4 bg-blue-600 text-white rounded">Save</button>
+                            </div>
+                        </>
+                    )}
+
+                    {activeTab === 'knowledgeBase' && (
+                        <div>
+                            {/* Knowledge Base Upload */}
+                            <div className="bg-white p-4 rounded-lg border border-slate-200 mb-4">
+                                <h3 className="text-lg font-bold text-slate-900 mb-2">Upload Document</h3>
+                                <label htmlFor="kb-upload-modal" className="w-full flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+                                    <BookText className={`w-10 h-10 mb-2 ${isUploadingKnowledgeBase ? 'text-blue-500 animate-pulse' : 'text-slate-400'}`} />
+                                    <span className={`font-semibold ${isUploadingKnowledgeBase ? 'text-blue-600' : 'text-purple-600'}`}>
+                                        {isUploadingKnowledgeBase ? 'Processing document...' : 'Click to upload PDF (max 20MB)'}
+                                    </span>
+                                    <span className="text-sm text-slate-500 mt-1">Buyer personas, messaging docs (.pdf format)</span>
+                                </label>
+                                <input id="kb-upload-modal" type="file" accept=".pdf" className="hidden" onChange={handleKnowledgeBaseFileUpload} disabled={isUploadingKnowledgeBase} />
+                                {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
+                                {successMessage && <p className="text-green-600 text-xs mt-2">{successMessage}</p>}
+                            </div>
+
+                            {/* Display Knowledge Base Items */}
+                            {knowledgeBaseItems.length > 0 && (
+                                <div className="mt-6">
+                                    <h3 className="text-lg font-bold text-slate-900 mb-3">Your Documents ({knowledgeBaseItems.length})</h3>
+                                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2"> {/* Added max-height and overflow */}
+                                        {knowledgeBaseItems.map(item => (
+                                            <div key={item.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                                <p className="font-semibold text-blue-700">{item.fileName}</p>
+                                                <p className="text-xs text-slate-500">Uploaded: {new Date(item.uploadedAt).toLocaleDateString()} at {new Date(item.uploadedAt).toLocaleTimeString()}</p>
+                                                <div className="mt-2 text-sm text-slate-700 max-h-16 overflow-y-auto bg-white p-1 rounded">
+                                                    <p>{item.extractedContent?.substring(0, 200)}...</p> {/* Displaying snippet */}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={onClose} className="py-2 px-4 rounded bg-slate-200 hover:bg-slate-300">Close</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         );
     };
+
 
     const ShareModal = ({ isOpen, onClose, snapshotId }) => {
         const [shareUrl, setShareUrl] = useState('');
@@ -560,12 +640,22 @@ const App = () => {
 
     return (
         <>
-            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentApiKey={apiKey} onSave={(key) => {
-                if(db && user?.uid) {
-                    const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'apiSettings');
-                    setDoc(settingsDocRef, { apiKey: key }, { merge: true });
-                }
-            }} />
+            <SettingsModal 
+                isOpen={isSettingsOpen} 
+                onClose={() => setIsSettingsOpen(false)} 
+                currentApiKey={apiKey} 
+                onSave={(key) => {
+                    if(db && user?.uid) {
+                        const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'apiSettings');
+                        setDoc(settingsDocRef, { apiKey: key }, { merge: true });
+                    }
+                }} 
+                knowledgeBaseItems={knowledgeBaseItems}
+                handleKnowledgeBaseFileUpload={handleKnowledgeBaseFileUpload}
+                isUploadingKnowledgeBase={isUploadingKnowledgeBase}
+                successMessage={successMessage} // Pass success message to modal
+                error={error} // Pass error message to modal
+            />
             <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} snapshotId={activeSnapshotId} />
 
             <div className="bg-slate-50 min-h-screen font-sans text-slate-800 p-4 sm:p-6 lg:p-8">
@@ -588,33 +678,7 @@ const App = () => {
                     </header>
                     
                     {!isSharedView && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 max-w-5xl mx-auto">
-                            {/* SEO Performance Data Upload */}
-                            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200">
-                                <h2 className="text-xl font-bold text-slate-900 mb-4">Upload Search Performance Data</h2>
-                                <label htmlFor="csv-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition">
-                                    <UploadCloud className={`w-12 h-12 mb-2 ${fileName ? 'text-green-500' : 'text-slate-400'}`} />
-                                    <span className={`font-semibold ${fileName ? 'text-green-600' : 'text-blue-600'}`}>
-                                        {fileName ? `Loaded: ${fileName}` : 'Click to upload CSV file'}
-                                    </span>
-                                    <span className="text-sm text-slate-500 mt-1">GSC 'Pages' export (.csv format)</span>
-                                </label>
-                                <input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-                            </div>
-
-                            {/* Knowledge Base Upload */}
-                            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200">
-                                <h2 className="text-xl font-bold text-slate-900 mb-4">Upload Knowledge Base Document</h2>
-                                <label htmlFor="kb-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition">
-                                    <BookText className={`w-12 h-12 mb-2 ${isUploadingKnowledgeBase ? 'text-blue-500 animate-pulse' : 'text-slate-400'}`} />
-                                    <span className={`font-semibold ${isUploadingKnowledgeBase ? 'text-blue-600' : 'text-purple-600'}`}>
-                                        {isUploadingKnowledgeBase ? 'Processing document...' : 'Click to upload PDF (max 20MB)'}
-                                    </span>
-                                    <span className="text-sm text-slate-500 mt-1">Buyer personas, messaging docs (.pdf format)</span>
-                                </label>
-                                <input id="kb-upload" type="file" accept=".pdf" className="hidden" onChange={handleKnowledgeBaseFileUpload} disabled={isUploadingKnowledgeBase} />
-                            </div>
-                        </div>
+                         <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200 mb-8 max-w-3xl mx-auto"><label htmlFor="csv-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition"><UploadCloud className={`w-12 h-12 mb-2 ${fileName ? 'text-green-500' : 'text-slate-400'}`} /><span className={`font-semibold ${fileName ? 'text-green-600' : 'text-blue-600'}`}>{fileName ? `Loaded: ${fileName}` : 'Click to upload CSV file'}</span><span className="text-sm text-slate-500 mt-1">GSC 'Pages' export (.csv format)</span></label><input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} /></div>
                     )}
                     
                     {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 my-6 rounded-lg max-w-3xl mx-auto flex items-center gap-3"><AlertCircle size={20} />{error}</div>}
@@ -626,24 +690,6 @@ const App = () => {
                             <button onClick={() => setIsShareModalOpen(true)} className="p-2 bg-white border rounded-lg hover:bg-slate-100" title="Share Snapshot"><Share2 size={20}/></button>
                         </div>
                     }
-
-                    {/* Display Knowledge Base Items */}
-                    {knowledgeBaseItems.length > 0 && (
-                        <div className="bg-white rounded-2xl shadow-lg border overflow-hidden mt-8 p-6 max-w-7xl mx-auto">
-                            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><BookText size={20}/> Your Knowledge Base Documents</h2>
-                            <div className="space-y-3">
-                                {knowledgeBaseItems.map(item => (
-                                    <div key={item.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                                        <p className="font-semibold text-blue-700">{item.fileName}</p>
-                                        <p className="text-xs text-slate-500">Uploaded: {new Date(item.uploadedAt).toLocaleDateString()} at {new Date(item.uploadedAt).toLocaleTimeString()}</p>
-                                        <div className="mt-2 text-sm text-slate-700 max-h-24 overflow-y-auto bg-white p-2 rounded">
-                                            <p>{item.extractedContent?.substring(0, 300)}...</p> {/* Displaying snippet */}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                     
                     {activeSnapshot && !isSharedView && (
                         <div className="text-center mb-8 flex justify-center items-center gap-4">
