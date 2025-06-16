@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound } from 'lucide-react';
+import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText } from 'lucide-react'; // Added BookText icon
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -189,6 +189,10 @@ const App = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'Impressions', direction: 'descending' });
     const [fileName, setFileName] = useState('');
+
+    // New state for Knowledge Base
+    const [knowledgeBaseItems, setKnowledgeBaseItems] = useState([]);
+    const [isUploadingKnowledgeBase, setIsUploadingKnowledgeBase] = useState(false);
     
     const isSharedView = !!sharedSnapshotData;
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
@@ -237,7 +241,7 @@ const App = () => {
             if (doc.exists()) setActiveSnapshotId(doc.data().activeSnapshotId || null);
         }, () => setError("Could not load saved settings."));
         return () => unsubscribe();
-    }, [isAuthReady, db, user, isSharedView]);
+    }, [isAuthReady, db, user, isSharedView, handleSetActiveSnapshot]);
 
     useEffect(() => {
         if (!isAuthReady || !db || !user?.uid || isSharedView) return;
@@ -250,6 +254,21 @@ const App = () => {
         }, () => setError("Could not load snapshot data."));
         return () => unsubscribe();
     }, [isAuthReady, db, user, activeSnapshotId, isSharedView, handleSetActiveSnapshot]);
+
+    // New useEffect for Knowledge Base Items
+    useEffect(() => {
+        if (!isAuthReady || !db || !user?.uid || isSharedView) return;
+        const knowledgeBaseColRef = collection(db, 'users', user.uid, 'knowledgeBase');
+        const q = query(knowledgeBaseColRef);
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const fetchedItems = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setKnowledgeBaseItems(fetchedItems);
+        }, (err) => {
+            setError("Could not load knowledge base items.");
+            console.error("Knowledge base load error:", err);
+        });
+        return () => unsubscribe();
+    }, [isAuthReady, db, user, isSharedView]);
 
 
     // --- Core Application Logic ---
@@ -279,15 +298,84 @@ const App = () => {
             });
         } catch (err) { setError(err.message || "Failed to load or parse the file."); }
     };
+
+    // New handleKnowledgeBaseFileUpload
+    const handleKnowledgeBaseFileUpload = async (event) => {
+        if (!db || !user?.uid) { setError("You must be signed in to upload a file."); return; }
+        const file = event.target.files[0];
+        if (!file || file.type !== 'application/pdf') { setError("Please upload a valid PDF (.pdf) file for the knowledge base."); return; }
+        if (file.size > 20 * 1024 * 1024) { // 20 MB limit for inline data
+            setError("PDF file is too large. Please upload files under 20MB for direct processing.");
+            return;
+        }
+
+        setIsUploadingKnowledgeBase(true);
+        setSuccessMessage('');
+        setError(null);
+
+        try {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const base64Pdf = btoa(new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+                
+                const prompt = "Extract all text content from this document.";
+                const contents = [
+                    { text: prompt },
+                    {
+                        inlineData: {
+                            mimeType: 'application/pdf',
+                            data: base64Pdf
+                        }
+                    }
+                ];
+                
+                // Adjusted callGemini usage for multimodal content
+                const extractedText = await callGemini(prompt, { contents: contents }); 
+
+                // Store extracted text in Firestore
+                const knowledgeBaseColRef = collection(db, 'users', user.uid, 'knowledgeBase');
+                await addDoc(knowledgeBaseColRef, {
+                    fileName: file.name,
+                    uploadedAt: new Date().toISOString(),
+                    extractedContent: extractedText,
+                    sourceType: file.type
+                });
+                setSuccessMessage(`"${file.name}" processed and added to knowledge base!`);
+            };
+            reader.onerror = () => { setError("Failed to read PDF file."); };
+            reader.readAsArrayBuffer(file);
+
+        } catch (err) {
+            setError(err.message || "Error processing PDF for knowledge base.");
+        } finally {
+            setIsUploadingKnowledgeBase(false);
+        }
+    };
     
     // --- API and Data Processing Logic ---
-    const callGemini = async (prompt, generationConfig) => {
+    const callGemini = async (prompt, options) => { // Modified to accept an options object
         const geminiApiKey = apiKey || GEMINI_API_KEY;
         if (!geminiApiKey) throw new Error("Gemini API key is missing. Please add it in Settings.");
-        const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig };
+        
+        // Default payload structure for text-only prompts
+        let payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+
+        // If options.contents is provided, it means it's a multimodal request (like PDF)
+        if (options && options.contents) {
+            payload.contents = options.contents;
+        }
+        
+        // Add generationConfig if provided
+        if (options && options.generationConfig) {
+            payload.generationConfig = options.generationConfig;
+        }
+
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
         const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (!response.ok) throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+        if (!response.ok) {
+            const errorBody = await response.json();
+            throw new Error(`API request failed: ${response.status} ${response.statusText} - ${errorBody.error?.message || 'Unknown error'}`);
+        }
         const result = await response.json();
         if (result.candidates?.[0]?.content?.parts?.[0]?.text) return result.candidates[0].content.parts[0].text;
         throw new Error("Invalid response from API.");
@@ -297,10 +385,11 @@ const App = () => {
         if (isSharedView || !activeSnapshot?.pages) { setError("No active data to analyze."); return; }
         setIsProcessing(true);
         setError(null);
+        // Updated callGemini to pass generationConfig in an options object
         const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "STRING" } }, opportunityPages: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
         try {
             const summaryPrompt = `Analyze the provided Google Search Console data. From the data, calculate the total impressions, total clicks, and the average CTR (as a percentage string, e.g., '2.51%'). Identify 2-3 key insights and 2-3 actionable recommendations. Also, identify up to 5 pages with high impressions but low CTR that represent good optimization opportunities, providing a short reason for each. Provide the entire response in the specified JSON format. Data sample: ${JSON.stringify(activeSnapshot.pages.slice(0, 100))}`;
-            const summaryJsonString = await callGemini(summaryPrompt, { responseMimeType: "application/json", responseSchema: schema });
+            const summaryJsonString = await callGemini(summaryPrompt, { generationConfig: { responseMimeType: "application/json", responseSchema: schema } });
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { performanceSummary: summaryJsonString });
             setSuccessMessage(`AI summary generated for ${activeSnapshot.fileName}!`);
@@ -499,7 +588,33 @@ const App = () => {
                     </header>
                     
                     {!isSharedView && (
-                         <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200 mb-8 max-w-3xl mx-auto"><label htmlFor="csv-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition"><UploadCloud className={`w-12 h-12 mb-2 ${fileName ? 'text-green-500' : 'text-slate-400'}`} /><span className={`font-semibold ${fileName ? 'text-green-600' : 'text-blue-600'}`}>{fileName ? `Loaded: ${fileName}` : 'Click to upload CSV file'}</span><span className="text-sm text-slate-500 mt-1">GSC 'Pages' export (.csv format)</span></label><input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} /></div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 max-w-5xl mx-auto">
+                            {/* SEO Performance Data Upload */}
+                            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200">
+                                <h2 className="text-xl font-bold text-slate-900 mb-4">Upload Search Performance Data</h2>
+                                <label htmlFor="csv-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+                                    <UploadCloud className={`w-12 h-12 mb-2 ${fileName ? 'text-green-500' : 'text-slate-400'}`} />
+                                    <span className={`font-semibold ${fileName ? 'text-green-600' : 'text-blue-600'}`}>
+                                        {fileName ? `Loaded: ${fileName}` : 'Click to upload CSV file'}
+                                    </span>
+                                    <span className="text-sm text-slate-500 mt-1">GSC 'Pages' export (.csv format)</span>
+                                </label>
+                                <input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                            </div>
+
+                            {/* Knowledge Base Upload */}
+                            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-lg border border-slate-200">
+                                <h2 className="text-xl font-bold text-slate-900 mb-4">Upload Knowledge Base Document</h2>
+                                <label htmlFor="kb-upload" className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+                                    <BookText className={`w-12 h-12 mb-2 ${isUploadingKnowledgeBase ? 'text-blue-500 animate-pulse' : 'text-slate-400'}`} />
+                                    <span className={`font-semibold ${isUploadingKnowledgeBase ? 'text-blue-600' : 'text-purple-600'}`}>
+                                        {isUploadingKnowledgeBase ? 'Processing document...' : 'Click to upload PDF (max 20MB)'}
+                                    </span>
+                                    <span className="text-sm text-slate-500 mt-1">Buyer personas, messaging docs (.pdf format)</span>
+                                </label>
+                                <input id="kb-upload" type="file" accept=".pdf" className="hidden" onChange={handleKnowledgeBaseFileUpload} disabled={isUploadingKnowledgeBase} />
+                            </div>
+                        </div>
                     )}
                     
                     {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 my-6 rounded-lg max-w-3xl mx-auto flex items-center gap-3"><AlertCircle size={20} />{error}</div>}
@@ -511,6 +626,24 @@ const App = () => {
                             <button onClick={() => setIsShareModalOpen(true)} className="p-2 bg-white border rounded-lg hover:bg-slate-100" title="Share Snapshot"><Share2 size={20}/></button>
                         </div>
                     }
+
+                    {/* Display Knowledge Base Items */}
+                    {knowledgeBaseItems.length > 0 && (
+                        <div className="bg-white rounded-2xl shadow-lg border overflow-hidden mt-8 p-6 max-w-7xl mx-auto">
+                            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><BookText size={20}/> Your Knowledge Base Documents</h2>
+                            <div className="space-y-3">
+                                {knowledgeBaseItems.map(item => (
+                                    <div key={item.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                        <p className="font-semibold text-blue-700">{item.fileName}</p>
+                                        <p className="text-xs text-slate-500">Uploaded: {new Date(item.uploadedAt).toLocaleDateString()} at {new Date(item.uploadedAt).toLocaleTimeString()}</p>
+                                        <div className="mt-2 text-sm text-slate-700 max-h-24 overflow-y-auto bg-white p-2 rounded">
+                                            <p>{item.extractedContent?.substring(0, 300)}...</p> {/* Displaying snippet */}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     
                     {activeSnapshot && !isSharedView && (
                         <div className="text-center mb-8 flex justify-center items-center gap-4">
