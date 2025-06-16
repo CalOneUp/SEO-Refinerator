@@ -78,7 +78,6 @@ const useAppCore = () => {
 
     useEffect(() => {
         if (!user || !db) return;
-        // Updated Firestore path for deployed app
         const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'apiSettings');
         const unsubscribe = onSnapshot(settingsDocRef, (doc) => {
             if (doc.exists() && doc.data().apiKey) {
@@ -92,7 +91,7 @@ const useAppCore = () => {
         return () => unsubscribe();
     }, [user, db]);
     
-    return { db, auth, user, isAuthReady, error, apiKey, setApiKey };
+    return { db, auth, user, isAuthReady, error, apiKey };
 };
 
 // --- Auth Screen Component ---
@@ -172,7 +171,7 @@ const AuthScreen = ({ auth }) => {
 
 // --- Main App Component ---
 const App = () => {
-    const { db, auth, user, isAuthReady, error: coreError, apiKey, setApiKey } = useAppCore();
+    const { db, auth, user, isAuthReady, error: coreError, apiKey } = useAppCore();
     const [snapshots, setSnapshots] = useState([]);
     const [activeSnapshotId, setActiveSnapshotId] = useState(null);
     const [sharedSnapshotData, setSharedSnapshotData] = useState(null);
@@ -194,12 +193,22 @@ const App = () => {
     const isSharedView = !!sharedSnapshotData;
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
     
-    // --- FIX: Call useMemo unconditionally ---
     const calculatedActiveSnapshot = useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
     const activeSnapshot = isSharedView ? sharedSnapshotData : calculatedActiveSnapshot;
     const error = uiError || coreError;
     
     const handleSignOut = () => { signOut(auth); };
+
+    const handleSetActiveSnapshot = useCallback(async (id) => {
+        if (isSharedView || !db || !user?.uid) return;
+        const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'userSettings');
+        try {
+            await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true });
+            setActiveSnapshotId(id);
+        } catch (err) {
+            setError("Could not switch snapshots.");
+        }
+    }, [isSharedView, db, user?.uid]);
 
     // --- Data Fetching and Initialization ---
     useEffect(() => {
@@ -220,6 +229,7 @@ const App = () => {
         }
     }, [db]);
 
+
     useEffect(() => {
         if (!isAuthReady || !db || !user?.uid || isSharedView) return;
         const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'userSettings');
@@ -239,7 +249,7 @@ const App = () => {
             if (!activeSnapshotId && fetchedSnapshots.length > 0) handleSetActiveSnapshot(fetchedSnapshots[0].id);
         }, () => setError("Could not load snapshot data."));
         return () => unsubscribe();
-    }, [isAuthReady, db, user, activeSnapshotId, isSharedView]);
+    }, [isAuthReady, db, user, activeSnapshotId, isSharedView, handleSetActiveSnapshot]);
 
 
     // --- Core Application Logic ---
@@ -268,13 +278,6 @@ const App = () => {
                 error: (err) => setError(`CSV Parsing Error: ${err.message}`)
             });
         } catch (err) { setError(err.message || "Failed to load or parse the file."); }
-    };
-
-    const handleSetActiveSnapshot = async (id) => {
-        if(isSharedView || !db || !user?.uid) return;
-        const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'userSettings');
-        try { await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true }); setActiveSnapshotId(id); }
-        catch (err) { setError("Could not switch snapshots."); }
     };
     
     // --- API and Data Processing Logic ---
@@ -429,7 +432,8 @@ const App = () => {
                 };
                 generateLink();
             }
-        }, [isOpen, snapshotId, user, db]);
+        }, [isOpen, snapshotId, user?.uid, db]);
+        
         const copyToClipboard = () => { navigator.clipboard.writeText(shareUrl).then(() => { setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); }); };
         if (!isOpen) return null;
         return (
@@ -463,7 +467,7 @@ const App = () => {
 
     if (!isAuthReady) return <div className="bg-slate-50 min-h-screen flex items-center justify-center"><Loader className="animate-spin w-12 h-12 text-blue-600" /></div>;
     
-    if (!user && !isSharedView) return <AuthScreen auth={auth} setError={setError} />;
+    if (!user && !isSharedView) return <AuthScreen auth={auth} />;
 
     return (
         <>
