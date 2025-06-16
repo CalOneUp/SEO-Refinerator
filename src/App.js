@@ -192,9 +192,12 @@ const App = () => {
     const [fileName, setFileName] = useState('');
     
     const isSharedView = !!sharedSnapshotData;
-    const activeSnapshot = isSharedView ? sharedSnapshotData : useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
-    const error = uiError || coreError;
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
+    
+    // --- FIX: Call useMemo unconditionally ---
+    const calculatedActiveSnapshot = useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
+    const activeSnapshot = isSharedView ? sharedSnapshotData : calculatedActiveSnapshot;
+    const error = uiError || coreError;
     
     const handleSignOut = () => { signOut(auth); };
 
@@ -203,12 +206,10 @@ const App = () => {
         const shareId = new URLSearchParams(window.location.search).get('share');
         if (shareId && db) {
             const fetchShared = async () => {
-                // Updated Firestore path for deployed app
                 const shareDocRef = doc(db, 'publicShares', shareId);
                 const shareDoc = await getDoc(shareDocRef);
                 if (shareDoc.exists()) {
                     const { ownerId, snapshotId } = shareDoc.data();
-                    // Updated Firestore path for deployed app
                     const snapshotDocRef = doc(db, 'users', ownerId, 'snapshots', snapshotId);
                     const snapshotDoc = await getDoc(snapshotDocRef);
                     if (snapshotDoc.exists()) setSharedSnapshotData({ id: snapshotDoc.id, ...snapshotDoc.data() });
@@ -221,7 +222,6 @@ const App = () => {
 
     useEffect(() => {
         if (!isAuthReady || !db || !user?.uid || isSharedView) return;
-        // Updated Firestore path for deployed app
         const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'userSettings');
         const unsubscribe = onSnapshot(settingsDocRef, (doc) => {
             if (doc.exists()) setActiveSnapshotId(doc.data().activeSnapshotId || null);
@@ -231,7 +231,6 @@ const App = () => {
 
     useEffect(() => {
         if (!isAuthReady || !db || !user?.uid || isSharedView) return;
-        // Updated Firestore path for deployed app
         const snapshotsColRef = collection(db, 'users', user.uid, 'snapshots');
         const q = query(snapshotsColRef);
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -261,7 +260,6 @@ const App = () => {
                     if (!results.data || !pageHeader) { setError("Invalid CSV format: 'Page' or 'Top pages' column not found."); return; }
                     const loadedPagesData = results.data.map(row => ({ Page: row[pageHeader], Clicks: Number(row.Clicks) || 0, Impressions: Number(row.Impressions) || 0, title: null, description: null })).filter(p => p.Page);
                     const newSnapshotData = { createdAt: new Date().toISOString(), fileName: file.name, pages: loadedPagesData, performanceSummary: null };
-                    // Updated Firestore path for deployed app
                     const snapshotsColRef = collection(db, 'users', user.uid, 'snapshots');
                     const newDocRef = await addDoc(snapshotsColRef, newSnapshotData);
                     await handleSetActiveSnapshot(newDocRef.id);
@@ -274,7 +272,6 @@ const App = () => {
 
     const handleSetActiveSnapshot = async (id) => {
         if(isSharedView || !db || !user?.uid) return;
-        // Updated Firestore path for deployed app
         const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'userSettings');
         try { await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true }); setActiveSnapshotId(id); }
         catch (err) { setError("Could not switch snapshots."); }
@@ -301,7 +298,6 @@ const App = () => {
         try {
             const summaryPrompt = `Analyze the provided Google Search Console data. From the data, calculate the total impressions, total clicks, and the average CTR (as a percentage string, e.g., '2.51%'). Identify 2-3 key insights and 2-3 actionable recommendations. Also, identify up to 5 pages with high impressions but low CTR that represent good optimization opportunities, providing a short reason for each. Provide the entire response in the specified JSON format. Data sample: ${JSON.stringify(activeSnapshot.pages.slice(0, 100))}`;
             const summaryJsonString = await callGemini(summaryPrompt, { responseMimeType: "application/json", responseSchema: schema });
-            // Updated Firestore path for deployed app
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { performanceSummary: summaryJsonString });
             setSuccessMessage(`AI summary generated for ${activeSnapshot.fileName}!`);
@@ -340,7 +336,6 @@ const App = () => {
         if (currentActiveSnapshot) {
             const updatedPages = [...currentActiveSnapshot.pages];
             updatedPages[pageIndex] = { ...updatedPages[pageIndex], ...metadata };
-            // Updated Firestore path for deployed app
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
         }
@@ -365,7 +360,6 @@ const App = () => {
             await new Promise(resolve => setTimeout(resolve, 200));
         }
         try {
-            // Updated Firestore path for deployed app
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
             setSuccessMessage("Successfully fetched all metadata!");
@@ -429,7 +423,6 @@ const App = () => {
             if (isOpen && snapshotId && user?.uid && db) {
                 const generateLink = async () => {
                     const shareId = `share_${user.uid.substring(0, 4)}_${Date.now()}`;
-                    // Updated Firestore path for deployed app
                     const shareDocRef = doc(db, 'publicShares', shareId);
                     await setDoc(shareDocRef, { ownerId: user.uid, snapshotId });
                     setShareUrl(`${window.location.origin}${window.location.pathname}?share=${shareId}`);
@@ -476,7 +469,6 @@ const App = () => {
         <>
             <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentApiKey={apiKey} onSave={(key) => {
                 if(db && user?.uid) {
-                    // Updated Firestore path for deployed app
                     const settingsDocRef = doc(db, 'users', user.uid, 'settings', 'apiSettings');
                     setDoc(settingsDocRef, { apiKey: key }, { merge: true });
                 }
