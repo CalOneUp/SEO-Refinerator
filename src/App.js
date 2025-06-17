@@ -195,11 +195,13 @@ const App = () => {
     const [isUploadingKnowledgeBase, setIsUploadingKnowledgeBase] = useState(false);
     
     const isSharedView = !!sharedSnapshotData;
+    // Modified setError to also clear successMessage, and vice-versa
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
+    const setSuccess = (msg) => { setSuccessMessage(msg); setUiError(null); };
     
     const calculatedActiveSnapshot = useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
     const activeSnapshot = isSharedView ? sharedSnapshotData : calculatedActiveSnapshot;
-    const error = uiError || coreError;
+    const error = uiError || coreError; // Consolidate errors
     
     const handleSignOut = () => { signOut(auth); };
 
@@ -278,7 +280,7 @@ const App = () => {
         if (!file || !file.name.endsWith('.csv')) { setError("Please upload a valid CSV (.csv) file."); return; }
         if (!db || !user?.uid) { setError("You must be signed in to upload a file."); return; }
         setFileName(file.name);
-        setSuccessMessage('');
+        setSuccess("File processing started..."); // User feedback
         setError(null);
         try {
             await loadScript('https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js');
@@ -292,17 +294,22 @@ const App = () => {
                     const snapshotsColRef = collection(db, 'users', user.uid, 'snapshots');
                     const newDocRef = await addDoc(snapshotsColRef, newSnapshotData);
                     await handleSetActiveSnapshot(newDocRef.id);
-                    setSuccessMessage("File processed and saved successfully!");
+                    setSuccess(`"${file.name}" processed and saved successfully!`);
                 },
                 error: (err) => setError(`CSV Parsing Error: ${err.message}`)
             });
         } catch (err) { setError(err.message || "Failed to load or parse the file."); }
+        finally { event.target.value = ''; } // Clear file input
     };
 
     // New handleKnowledgeBaseFileUpload
     const handleKnowledgeBaseFileUpload = async (event) => {
         if (!db || !user?.uid) { setError("You must be signed in to upload a file."); return; }
         const file = event.target.files[0];
+        
+        setError(null); // Clear previous errors
+        setSuccessMessage(''); // Clear previous success messages
+        
         if (!file || file.type !== 'application/pdf') { setError("Please upload a valid PDF (.pdf) file for the knowledge base."); return; }
         if (file.size > 20 * 1024 * 1024) { // 20 MB limit for inline data
             setError("PDF file is too large. Please upload files under 20MB for direct processing.");
@@ -310,17 +317,17 @@ const App = () => {
         }
 
         setIsUploadingKnowledgeBase(true);
-        setSuccessMessage('');
-        setError(null);
+        setSuccess("Processing document...");
 
         try {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const base64Pdf = btoa(new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), ''));
                 
-                const prompt = "Extract all text content from this document.";
-                const contents = [
-                    { text: prompt },
+                // First call to Gemini to extract all text
+                const textExtractionPrompt = "Extract all text content from this document.";
+                const textContents = [
+                    { text: textExtractionPrompt },
                     {
                         inlineData: {
                             mimeType: 'application/pdf',
@@ -328,19 +335,25 @@ const App = () => {
                         }
                     }
                 ];
-                
-                // Adjusted callGemini usage for multimodal content
-                const extractedText = await callGemini(prompt, { contents: contents }); 
+                setSuccess("Extracting text from PDF...");
+                const extractedText = await callGemini(textExtractionPrompt, { contents: textContents }); 
 
-                // Store extracted text in Firestore
+                // Second call to Gemini to summarize the extracted text
+                // Truncate text if it's extremely long, to stay within prompt limits for the summary call
+                const summaryPromptText = `Provide a concise summary of the key information and main topics from the following text:\n\n${extractedText.substring(0, 10000)}`; // Using a reasonable chunk
+                setSuccess("Summarizing document content...");
+                const summary = await callGemini(summaryPromptText, {}); // No inlineData needed for text-only summary
+
+                // Store extracted text and summary in Firestore
                 const knowledgeBaseColRef = collection(db, 'users', user.uid, 'knowledgeBase');
                 await addDoc(knowledgeBaseColRef, {
                     fileName: file.name,
                     uploadedAt: new Date().toISOString(),
-                    extractedContent: extractedText,
+                    extractedContent: extractedText, // Storing full extracted text
+                    summary: summary, // Storing AI generated summary
                     sourceType: file.type
                 });
-                setSuccessMessage(`"${file.name}" processed and added to knowledge base!`);
+                setSuccess(`"${file.name}" processed and added to knowledge base!`);
             };
             reader.onerror = () => { setError("Failed to read PDF file."); };
             reader.readAsArrayBuffer(file);
@@ -349,6 +362,7 @@ const App = () => {
             setError(err.message || "Error processing PDF for knowledge base.");
         } finally {
             setIsUploadingKnowledgeBase(false);
+            event.target.value = ''; // Clear file input after upload attempt
         }
     };
     
@@ -385,6 +399,7 @@ const App = () => {
         if (isSharedView || !activeSnapshot?.pages) { setError("No active data to analyze."); return; }
         setIsProcessing(true);
         setError(null);
+        setSuccessMessage('');
         // Updated callGemini to pass generationConfig in an options object
         const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
         try {
@@ -392,7 +407,7 @@ const App = () => {
             const summaryJsonString = await callGemini(summaryPrompt, { generationConfig: { responseMimeType: "application/json", responseSchema: schema } });
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { performanceSummary: summaryJsonString });
-            setSuccessMessage(`AI summary generated for ${activeSnapshot.fileName}!`);
+            setSuccess(`AI summary generated for ${activeSnapshot.fileName}!`);
         } catch (err) {
             setError(err.message || "Error during summary generation.");
         } finally {
@@ -423,6 +438,7 @@ const App = () => {
         if (isSharedView || !pageUrl || fetchingMetadata[pageUrl]) return;
         setFetchingMetadata(prev => ({ ...prev, [pageUrl]: true }));
         setError(null);
+        setSuccessMessage('');
         const metadata = await fetchSinglePageMetadata(pageUrl);
         const currentActiveSnapshot = snapshots.find(s => s.id === activeSnapshotId);
         if (currentActiveSnapshot) {
@@ -440,6 +456,7 @@ const App = () => {
         if (!currentActiveSnapshot?.pages) { setError("No pages to fetch metadata for."); return; }
         setIsBulkFetching(true);
         setError(null);
+        setSuccessMessage('');
         const pagesToFetch = currentActiveSnapshot.pages.filter(p => !p.title);
         setBulkFetchProgress({ current: 0, total: pagesToFetch.length });
         let updatedPages = [...currentActiveSnapshot.pages];
@@ -454,7 +471,7 @@ const App = () => {
         try {
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
-            setSuccessMessage("Successfully fetched all metadata!");
+            setSuccess("Successfully fetched all metadata!");
         } catch (err) {
             setError("Failed to save updated metadata.");
         } finally {
@@ -492,7 +509,7 @@ const App = () => {
     // MODIFIED SettingsModal to include Knowledge Base tab
     const SettingsModal = ({ isOpen, onClose, currentApiKey, onSave,
         knowledgeBaseItems, handleKnowledgeBaseFileUpload, isUploadingKnowledgeBase,
-        successMessage, error // Pass success and error for modal internal display
+        modalSuccessMessage, modalError // Renamed props to avoid confusion with App's state
     }) => {
         const [key, setKey] = useState('');
         const [activeTab, setActiveTab] = useState('api'); // 'api' or 'knowledgeBase'
@@ -500,10 +517,8 @@ const App = () => {
         useEffect(() => { 
             if(isOpen) {
                 setKey(currentApiKey || '');
-                // Reset errors/success when modal opens or tab changes
-                // If you want separate error states, you'd manage them differently.
             }
-        }, [isOpen, currentApiKey]); // Removed activeTab from dependency array to not clear state on tab change
+        }, [isOpen, currentApiKey]); 
 
         if (!isOpen) return null;
 
@@ -556,8 +571,9 @@ const App = () => {
                                     <span className="text-sm text-slate-500 mt-1">Buyer personas, messaging docs (.pdf format)</span>
                                 </label>
                                 <input id="kb-upload-modal" type="file" accept=".pdf" className="hidden" onChange={handleKnowledgeBaseFileUpload} disabled={isUploadingKnowledgeBase} />
-                                {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
-                                {successMessage && <p className="text-green-600 text-xs mt-2">{successMessage}</p>}
+                                {/* Feedback messages within the modal for KB upload */}
+                                {modalError && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-2 my-2 rounded-lg flex items-center gap-2 text-sm"><AlertCircle size={16}/>{modalError}</div>}
+                                {modalSuccessMessage && <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-2 my-2 rounded-lg text-sm">{modalSuccessMessage}</div>}
                             </div>
 
                             {/* Display Knowledge Base Items */}
@@ -569,9 +585,19 @@ const App = () => {
                                             <div key={item.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                                                 <p className="font-semibold text-blue-700">{item.fileName}</p>
                                                 <p className="text-xs text-slate-500">Uploaded: {new Date(item.uploadedAt).toLocaleDateString()} at {new Date(item.uploadedAt).toLocaleTimeString()}</p>
-                                                <div className="mt-2 text-sm text-slate-700 max-h-16 overflow-y-auto bg-white p-1 rounded">
-                                                    <p>{item.extractedContent?.substring(0, 200)}...</p> {/* Displaying snippet */}
-                                                </div>
+                                                {/* Displaying the summary here */}
+                                                {item.summary && (
+                                                    <div className="mt-2 text-sm text-slate-700 max-h-16 overflow-y-auto bg-white p-1 rounded border border-slate-100">
+                                                        <p className="font-medium">Summary:</p>
+                                                        <p>{item.summary}</p>
+                                                    </div>
+                                                )}
+                                                {!item.summary && item.extractedContent && (
+                                                    <div className="mt-2 text-sm text-slate-700 max-h-16 overflow-y-auto bg-white p-1 rounded border border-slate-100">
+                                                        <p className="font-medium">Extracted Text (Snippet):</p>
+                                                        <p>{item.extractedContent?.substring(0, 200)}...</p>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -653,8 +679,8 @@ const App = () => {
                 knowledgeBaseItems={knowledgeBaseItems}
                 handleKnowledgeBaseFileUpload={handleKnowledgeBaseFileUpload}
                 isUploadingKnowledgeBase={isUploadingKnowledgeBase}
-                successMessage={successMessage} // Pass success message to modal
-                error={error} // Pass error message to modal
+                modalSuccessMessage={successMessage} // Pass success message to modal
+                modalError={error} // Pass error message to modal
             />
             <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} snapshotId={activeSnapshotId} />
 
