@@ -324,19 +324,24 @@ const App = () => {
             reader.onload = async (e) => {
                 const base64Pdf = btoa(new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), ''));
                 
-                // First call to Gemini to extract all text
+                // Corrected structure for multimodal content in Gemini API call
                 const textExtractionPrompt = "Extract all text content from this document.";
-                const textContents = [
-                    { text: textExtractionPrompt },
-                    {
-                        inlineData: {
-                            mimeType: 'application/pdf',
-                            data: base64Pdf
+                const contentsForExtraction = [{ // This is the 'contents' array for the API payload
+                    role: "user",
+                    parts: [
+                        { text: textExtractionPrompt }, // First part: text prompt
+                        { // Second part: inlineData for the PDF
+                            inlineData: {
+                                mimeType: 'application/pdf',
+                                data: base64Pdf
+                            }
                         }
-                    }
-                ];
+                    ]
+                }];
+                
                 setSuccess("Extracting text from PDF...");
-                const extractedText = await callGemini(textExtractionPrompt, { contents: textContents }); 
+                // Pass the correctly structured contents directly
+                const extractedText = await callGemini(textExtractionPrompt, { contents: contentsForExtraction }); 
 
                 // Second call to Gemini to summarize the extracted text
                 // Truncate text if it's extremely long, to stay within prompt limits for the summary call
@@ -372,11 +377,13 @@ const App = () => {
         if (!geminiApiKey) throw new Error("Gemini API key is missing. Please add it in Settings.");
         
         // Default payload structure for text-only prompts
+        // This default structure is correct: contents is an array with one object for the user role
         let payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
         // If options.contents is provided, it means it's a multimodal request (like PDF)
+        // In this case, options.contents should already be in the correct structure
         if (options && options.contents) {
-            payload.contents = options.contents;
+            payload.contents = options.contents; 
         }
         
         // Add generationConfig if provided
@@ -472,7 +479,8 @@ const App = () => {
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
             setSuccess("Successfully fetched all metadata!");
-        } catch (err) {
+        } <<<<<<< Updated upstream
+catch (err) {
             setError("Failed to save updated metadata.");
         } finally {
             setIsBulkFetching(false);
