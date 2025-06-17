@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText } from 'lucide-react'; // Added BookText icon
+import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText, Wand2 } from 'lucide-react'; // Added Wand2 icon
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -193,6 +193,9 @@ const App = () => {
     // New state for Knowledge Base
     const [knowledgeBaseItems, setKnowledgeBaseItems] = useState([]);
     const [isUploadingKnowledgeBase, setIsUploadingKnowledgeBase] = useState(false);
+    
+    // State for Meta Data Suggestion
+    const [isSuggestingMeta, setIsSuggestingMeta] = useState({}); // Stores loading state for each page by URL
     
     const isSharedView = !!sharedSnapshotData;
     // Modified setError to also clear successMessage, and vice-versa
@@ -408,9 +411,9 @@ const App = () => {
         setError(null);
         setSuccessMessage('');
         // Updated callGemini to pass generationConfig in an options object
-        const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
+        const schema = {type: "OBJECT", properties: {totalImpressions: { type: "NUMBER" }, totalClicks: { type: "NUMBER" }, totalPages: { type: "NUMBER" }, averageCtr: { type: "STRING" }, keyInsights: { type: "ARRAY", items: { type: "STRING" } }, recommendations: { type: "ARRAY", items: { type: "STRING" } }, opportunityPages: { type: "ARRAY", items: { type: "OBJECT", properties: { page: { type: "STRING" }, reasoning: { type: "STRING" } } } } }, required: ["totalImpressions", "totalClicks", "averageCtr", "keyInsights", "recommendations", "opportunityPages"]};
         try {
-            const summaryPrompt = `Analyze the provided Google Search Console data. From the data, calculate the total impressions, total clicks, and the average CTR (as a percentage string, e.g., '2.51%'). Identify 2-3 key insights and 2-3 actionable recommendations. Also, identify up to 5 pages with high impressions but low CTR that represent good optimization opportunities, providing a short reason for each. Provide the entire response in the specified JSON format. Data sample: ${JSON.stringify(activeSnapshot.pages.slice(0, 100))}`;
+            const summaryPrompt = `Analyze the provided Google Search Console data. From the data, calculate the total impressions, total clicks, and the average CTR (as a percentage string, e.g., '2.51%'). Identify 2-3 key insights and 2-3 actionable recommendations. Also, identify up to 10 pages with high impressions but low CTR that represent good optimization opportunities, providing a short reason for each. Provide the entire response in the specified JSON format. Data sample: ${JSON.stringify(activeSnapshot.pages.slice(0, 100))}`;
             const summaryJsonString = await callGemini(summaryPrompt, { generationConfig: { responseMimeType: "application/json", responseSchema: schema } });
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { performanceSummary: summaryJsonString });
@@ -475,16 +478,63 @@ const App = () => {
             if(originalIndex !== -1) { updatedPages[originalIndex] = { ...updatedPages[originalIndex], ...metadata }; }
             await new Promise(resolve => setTimeout(resolve, 200));
         }
-        try { // This is line 478 where the error was reported
+        try { 
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
             setSuccess("Successfully fetched all metadata!");
-        } catch (err) { // Removed the merge conflict marker here
+        } catch (err) { 
             setError("Failed to save updated metadata.");
         } finally {
             setIsBulkFetching(false);
         }
     };
+
+    // --- New Function: Suggest Meta Data ---
+    const suggestMetaData = useCallback(async (page, pageIndex) => {
+        if (isSharedView || !db || !user?.uid || isSuggestingMeta[page.Page]) return;
+
+        setIsSuggestingMeta(prev => ({ ...prev, [page.Page]: true }));
+        setSuccessMessage('');
+        setError(null);
+
+        try {
+            const metaSuggestionSchema = {
+                type: "OBJECT",
+                properties: {
+                    title: { type: "STRING", description: "Optimized SEO title (max 60 characters)" },
+                    description: { type: "STRING", description: "Optimized meta description (max 160 characters)" }
+                },
+                required: ["title", "description"]
+            };
+
+            const metaPrompt = `Given the page URL: ${page.Page}, existing title: "${page.title || 'N/A'}", and description: "${page.description || 'N/A'}", suggest an optimized new SEO title (max 60 characters) and meta description (max 160 characters). Provide only the new title and description in the specified JSON format.`;
+
+            setSuccess("Generating meta data suggestions...");
+            const suggestionsJsonString = await callGemini(metaPrompt, { 
+                generationConfig: { responseMimeType: "application/json", responseSchema: metaSuggestionSchema } 
+            });
+            const suggestions = JSON.parse(suggestionsJsonString);
+
+            // Update the page in Firestore with suggestions
+            const currentActiveSnapshot = snapshots.find(s => s.id === activeSnapshotId);
+            if (currentActiveSnapshot) {
+                const updatedPages = [...currentActiveSnapshot.pages];
+                updatedPages[pageIndex] = { 
+                    ...updatedPages[pageIndex], 
+                    suggestedTitle: suggestions.title, 
+                    suggestedDescription: suggestions.description 
+                };
+                const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
+                await updateDoc(snapshotDocRef, { pages: updatedPages });
+                setSuccess(`New meta data suggested for "${page.Page}"!`);
+            }
+        } catch (err) {
+            setError(err.message || `Error suggesting meta data for ${page.Page}.`);
+        } finally {
+            setIsSuggestingMeta(prev => ({ ...prev, [page.Page]: false }));
+        }
+    }, [isSharedView, db, user?.uid, isSuggestingMeta, activeSnapshotId, snapshots, callGemini, setError, setSuccess]);
+
 
     // --- Derived State & UI Components ---
     const parsedSummary = useMemo(() => {
@@ -497,6 +547,14 @@ const App = () => {
     const sortedAndFilteredPages = useMemo(() => {
         if (!activeSnapshot?.pages) return [];
         let sorted = [...activeSnapshot.pages];
+
+        // Mark top opportunities identified by AI summary
+        const opportunityPageUrls = new Set(parsedSummary?.opportunityPages?.map(p => p.page) || []);
+        sorted = sorted.map(page => ({
+            ...page,
+            isTopOpportunity: opportunityPageUrls.has(page.Page)
+        }));
+
         if (sortConfig.key) {
             sorted.sort((a, b) => {
                 const valA = a[sortConfig.key] || 0; const valB = b[sortConfig.key] || 0;
@@ -506,7 +564,7 @@ const App = () => {
             });
         }
         return searchTerm ? sorted.filter(p => p.Page?.toLowerCase().includes(searchTerm.toLowerCase())) : sorted;
-    }, [activeSnapshot, searchTerm, sortConfig]);
+    }, [activeSnapshot, searchTerm, sortConfig, parsedSummary]);
     
     const requestSort = (key) => {
         const direction = (sortConfig.key === key && sortConfig.direction === 'descending') ? 'ascending' : 'descending';
@@ -744,8 +802,74 @@ const App = () => {
                                 <div className="relative flex-grow w-full md:w-auto"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search by page URL..." onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"/></div>
                                 {!isSharedView && <button onClick={handleBulkFetchMetadata} disabled={isBulkFetching} className="inline-flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:bg-slate-400 w-full md:w-auto">{isBulkFetching ? <><Loader size={16} className="animate-spin" /> {`Fetching... ${bulkFetchProgress.current} of ${bulkFetchProgress.total}`}</> : <><RefreshCw size={16} /> Fetch All Metadata</>}</button>}
                             </div>
-                            <div className="md:hidden">{sortedAndFilteredPages.map((page, index) => <div key={`${page.Page}-${index}`} className="border-t border-slate-200 p-4"><a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a><div className="flex justify-between mt-3 text-sm"><div><span className="font-semibold text-slate-600">Impressions:</span> {(page.Impressions || 0).toLocaleString()}</div><div><span className="font-semibold text-slate-600">Clicks:</span> {(page.Clicks || 0).toLocaleString()}</div></div><div className="mt-4 p-3 bg-slate-50 rounded-lg">{page.title || page.description ? <><p className="font-semibold text-sm text-slate-800">{page.title}</p><p className="text-xs text-slate-600 mt-1">{page.description}</p></> : <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-sm text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-2">{fetchingMetadata[page.Page] ? <><Loader size={14} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={14} /> Fetch Info </>}</button>}</div></div>)}</div>
-                            <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm text-left text-slate-500"><thead className="text-xs text-slate-700 uppercase bg-slate-50"><tr><th scope="col" className="px-6 py-3 font-bold">Page & Metadata</th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Impressions')}>Impressions <ArrowUpDown size={14} className="inline ml-1"/></th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Clicks')}>Clicks <ArrowUpDown size={14} className="inline ml-1"/></th></tr></thead><tbody>{sortedAndFilteredPages.map((page, index) => <tr key={`${page.Page}-${index}`} className="bg-white border-b hover:bg-slate-50"><td className="px-6 py-4"><a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a><div className="mt-2 p-2 bg-slate-50 rounded">{page.title || page.description ? <><p className="font-semibold text-xs text-slate-800">{page.title}</p><p className="text-xs text-slate-500 mt-1">{page.description}</p></> : <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-xs text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-1">{fetchingMetadata[page.Page] ? <><Loader size={12} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={12} /> Fetch Info</>}</button>}</div></td><td className="px-6 py-4">{(page.Impressions || 0).toLocaleString()}</td><td className="px-6 py-4">{(page.Clicks || 0).toLocaleString()}</td></tr>)}</tbody></table></div>
+                            <div className="md:hidden">{sortedAndFilteredPages.map((page, index) => <div key={`${page.Page}-${index}`} className="border-t border-slate-200 p-4">
+                                {page.isTopOpportunity && <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20 mb-2">Top Opportunity</span>}
+                                <a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a>
+                                <div className="flex justify-between mt-3 text-sm">
+                                    <div><span className="font-semibold text-slate-600">Impressions:</span> {(page.Impressions || 0).toLocaleString()}</div>
+                                    <div><span className="font-semibold text-slate-600">Clicks:</span> {(page.Clicks || 0).toLocaleString()}</div>
+                                </div>
+                                <div className="mt-4 p-3 bg-slate-50 rounded-lg">
+                                    {page.title || page.description ? (
+                                        <>
+                                            <p className="font-semibold text-sm text-slate-800">{page.title}</p>
+                                            <p className="text-xs text-slate-600 mt-1">{page.description}</p>
+                                        </>
+                                    ) : (
+                                        <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-sm text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-2">
+                                            {fetchingMetadata[page.Page] ? <><Loader size={14} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={14} /> Fetch Info </>}
+                                        </button>
+                                    )}
+                                    {!isSharedView && (
+                                        <div className="mt-2 text-right">
+                                            <button onClick={() => suggestMetaData(page, index)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                                {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
+                                            </button>
+                                        </div>
+                                    )}
+                                    {page.suggestedTitle && page.suggestedDescription && (
+                                        <div className="mt-3 p-2 bg-purple-50 rounded-lg border border-purple-200">
+                                            <p className="font-semibold text-xs text-purple-800">Suggested Meta:</p>
+                                            <p className="text-xs text-purple-700">Title: {page.suggestedTitle}</p>
+                                            <p className="text-xs text-purple-700">Description: {page.suggestedDescription}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>)}</div>
+                            <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm text-left text-slate-500"><thead className="text-xs text-slate-700 uppercase bg-slate-50"><tr><th scope="col" className="px-6 py-3 font-bold">Page & Metadata</th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Impressions')}>Impressions <ArrowUpDown size={14} className="inline ml-1"/></th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Clicks')}>Clicks <ArrowUpDown size={14} className="inline ml-1"/></th><th scope="col" className="px-6 py-3 font-bold">Actions</th></tr></thead><tbody>{sortedAndFilteredPages.map((page, index) => <tr key={`${page.Page}-${index}`} className="bg-white border-b hover:bg-slate-50">
+                                <td className="px-6 py-4">
+                                    {page.isTopOpportunity && <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20 mb-1">Top Opportunity</span>}
+                                    <a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a>
+                                    <div className="mt-2 p-2 bg-slate-50 rounded">
+                                        {page.title || page.description ? (
+                                            <>
+                                                <p className="font-semibold text-xs text-slate-800">{page.title}</p>
+                                                <p className="text-xs text-slate-500 mt-1">{page.description}</p>
+                                            </>
+                                        ) : (
+                                            <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-xs text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-1">
+                                                {fetchingMetadata[page.Page] ? <><Loader size={12} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={12} /> Fetch Info</>}
+                                            </button>
+                                        )}
+                                        {page.suggestedTitle && page.suggestedDescription && (
+                                            <div className="mt-3 p-2 bg-purple-50 rounded-lg border border-purple-200">
+                                                <p className="font-semibold text-xs text-purple-800">Suggested Meta:</p>
+                                                <p className="text-xs text-purple-700">Title: {page.suggestedTitle}</p>
+                                                <p className="text-xs text-purple-700">Description: {page.suggestedDescription}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4">{(page.Impressions || 0).toLocaleString()}</td>
+                                <td className="px-6 py-4">{(page.Clicks || 0).toLocaleString()}</td>
+                                <td className="px-6 py-4">
+                                    {!isSharedView && (
+                                        <button onClick={() => suggestMetaData(page, index)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                            {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
+                                        </button>
+                                    )}
+                                </td>
+                            </tr>)}</tbody></table></div>
                         </div>
                     )}
                 </div>
