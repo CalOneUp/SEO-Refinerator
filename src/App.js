@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText, Wand2 } from 'lucide-react'; // Added Wand2 icon
+import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Share2, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText, Wand2, History } from 'lucide-react'; // Added History icon for changelog
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -22,6 +22,7 @@ import {
     onSnapshot,
     getDoc,
     query
+    // Removed orderBy as it's not needed for static data
 } from 'firebase/firestore';
 
 // --- Firebase Configuration ---
@@ -178,6 +179,7 @@ const App = () => {
     
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+    const [isChangelogOpen, setIsChangelogOpen] = useState(false); // New state for Changelog Modal
 
     const [fetchingMetadata, setFetchingMetadata] = useState({});
     const [isBulkFetching, setIsBulkFetching] = useState(false);
@@ -199,6 +201,30 @@ const App = () => {
     
     // New state for filtering by Top Opportunities
     const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
+
+    // Initial Changelog Data (Static)
+    const [changelogItems, setChangelogItems] = useState([
+        {
+            id: 'v1.0.0',
+            version: '1.0.0',
+            timestamp: '2025-06-17T16:30:00.000Z', // Use current date for initial summary
+            changes: [
+                {type: "New Feature", description: "Core Functionality: Upload Google Search Console CSV, generate AI performance summaries, and fetch basic page metadata."},
+                {type: "New Feature", description: "User Authentication implemented (Email/Password, Google Sign-in)."},
+                {type: "Improvement", description: "Centralized 'Settings' modal for API Key management and other user preferences."},
+                {type: "Bug Fix", description: "Resolved Netlify build issues (SyntaxError, missing catch/finally, CI=false configuration)."},
+                {type: "Improvement", description: "Enhanced API error handling for clearer user feedback."},
+                {type: "New Feature", description: "Knowledge Base: Upload PDF documents directly, Gemini extracts text and provides summaries, stored persistently in your settings."},
+                {type: "Improvement", description: "Knowledge Base upload and display are now integrated into the Settings Modal."},
+                {type: "New Feature", description: "Automated SEO Meta Data Suggestions: Generate optimized titles/descriptions for individual pages using Gemini AI."},
+                {type: "Improvement", description: "Meta Data Suggestions now include AI-generated reasoning for clarity on why suggestions were made."},
+                {type: "Bug Fix", description: "Corrected issue where 'Suggest Meta' applied suggestions to incorrect pages."},
+                {type: "New Feature", description: "Top Opportunities Filter: Easily view pages identified by AI as best for improvement in the pages list."},
+                {type: "New Feature", description: "Implemented Changelog: View application updates within the app via a dedicated modal."}
+            ]
+        }
+    ]);
+
 
     const isSharedView = !!sharedSnapshotData;
     // Modified setError to also clear successMessage, and vice-versa
@@ -263,7 +289,7 @@ const App = () => {
         return () => unsubscribe();
     }, [isAuthReady, db, user, activeSnapshotId, isSharedView, handleSetActiveSnapshot]);
 
-    // New useEffect for Knowledge Base Items
+    // Re-added useEffect for Knowledge Base Items as it still uses Firestore
     useEffect(() => {
         if (!isAuthReady || !db || !user?.uid || isSharedView) return;
         const knowledgeBaseColRef = collection(db, 'users', user.uid, 'knowledgeBase');
@@ -516,7 +542,7 @@ const App = () => {
             };
 
             // Updated prompt to ask for reasoning
-            const metaPrompt = `Given the page URL: ${pageToUpdate.Page}, existing title: "${pageToUpdate.title || 'N/A'}", and description: "${pageToUpdate.description || 'N/A'}", suggest an optimized new SEO title (max 60 characters), meta description (max 160 characters), AND provide a brief explanation for these suggestions. Provide the new title, description, and reasoning in the specified JSON format.`;
+            const metaPrompt = `Given the page URL: <span class="math-inline">\{pageToUpdate\.Page\}, existing title\: "</span>{pageToUpdate.title || 'N/A'}", and description: "${pageToUpdate.description || 'N/A'}", suggest an optimized new SEO title (max 60 characters), meta description (max 160 characters), AND provide a brief explanation for these suggestions. Provide the new title, description, and reasoning in the specified JSON format.`;
 
             setSuccess("Generating meta data suggestions...");
             const suggestionsJsonString = await callGemini(metaPrompt, { 
@@ -717,7 +743,7 @@ const App = () => {
                     const shareId = `share_${user.uid.substring(0, 4)}_${Date.now()}`;
                     const shareDocRef = doc(db, 'publicShares', shareId);
                     await setDoc(shareDocRef, { ownerId: user.uid, snapshotId });
-                    setShareUrl(`${window.location.origin}${window.location.pathname}?share=${shareId}`);
+                    setShareUrl(`<span class="math-inline">\{window\.location\.origin\}</span>{window.location.pathname}?share=${shareId}`);
                 };
                 generateLink();
             }
@@ -738,6 +764,51 @@ const App = () => {
                         {isCopied && <p className="text-sm text-green-600 mt-2">Copied!</p>}
                     </> : <Loader className="animate-spin" />}
                      <div className="flex justify-end mt-4"><button onClick={onClose} className="py-2 px-4 rounded">Close</button></div>
+                </div>
+            </div>
+        );
+    };
+
+    // New ChangelogModal Component (now uses static changelogItems)
+    const ChangelogModal = ({ isOpen, onClose, changelogItems }) => {
+        if (!isOpen) return null;
+
+        // Sort items by timestamp in descending order for display
+        const sortedChangelogItems = useMemo(() => {
+            return [...changelogItems].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }, [changelogItems]);
+
+        return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
+                <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+                    <h2 className="text-xl font-bold mb-4">Changelog <History size={20} className="inline-block ml-2"/></h2>
+                    <div className="max-h-96 overflow-y-auto pr-2">
+                        {sortedChangelogItems.length === 0 ? (
+                            <p className="text-slate-600">No changelog entries found.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                {sortedChangelogItems.map((entry) => (
+                                    <div key={entry.id} className="border-b border-slate-200 pb-3">
+                                        <p className="text-sm font-semibold text-slate-800">{entry.version} - {new Date(entry.timestamp).toLocaleDateString()}</p>
+                                        <ul className="list-disc pl-5 text-slate-700">
+                                            {entry.changes.map((change, idx) => (
+                                                <li key={idx}>
+                                                    <span className={`font-medium ${
+                                                        change.type === 'New Feature' ? 'text-green-600' :
+                                                        change.type === 'Bug Fix' ? 'text-red-600' :
+                                                        'text-blue-600'
+                                                    }`}>[{change.type}]</span> {change.description}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex justify-end mt-4">
+                        <button onClick={onClose} className="py-2 px-4 rounded bg-slate-200 hover:bg-slate-300">Close</button>
+                    </div>
                 </div>
             </div>
         );
@@ -777,6 +848,7 @@ const App = () => {
                 modalError={error} // Pass error message to modal
             />
             <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} snapshotId={activeSnapshotId} />
+            <ChangelogModal isOpen={isChangelogOpen} onClose={() => setIsChangelogOpen(false)} changelogItems={changelogItems} />
 
             <div className="bg-slate-50 min-h-screen font-sans text-slate-800 p-4 sm:p-6 lg:p-8">
                 <div className="max-w-7xl mx-auto">
@@ -787,6 +859,7 @@ const App = () => {
                             <div className="w-24 flex justify-end items-center gap-2">
                                 {user && !isSharedView && <>
                                     <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-slate-200 rounded-full" title="Settings"><Settings size={20}/></button>
+                                    <button onClick={() => setIsChangelogOpen(true)} className="p-2 hover:bg-slate-200 rounded-full" title="Changelog"><History size={20}/></button> {/* New Changelog Button */}
                                     <button onClick={handleSignOut} className="p-2 hover:bg-slate-200 rounded-full" title="Sign Out"><LogOut size={20}/></button>
                                 </>}
                             </div>
@@ -840,84 +913,41 @@ const App = () => {
                                     />
                                     <label htmlFor="showOpportunities" className="text-sm font-medium text-slate-700">Show only Top Opportunities</label>
                                 </div>
-                                {!isSharedView && <button onClick={handleBulkFetchMetadata} disabled={isBulkFetching} className="inline-flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:bg-slate-400 w-full md:w-auto">{isBulkFetching ? <><Loader size={16} className="animate-spin" /> {`Fetching... ${bulkFetchProgress.current} of ${bulkFetchProgress.total}`}</> : <><RefreshCw size={16} /> Fetch All Metadata</>}</button>}
-                            </div>
-                            <div className="md:hidden">{sortedAndFilteredPages.map((page, index) => <div key={`${page.Page}-${index}`} className="border-t border-slate-200 p-4">
-                                {page.isTopOpportunity && <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20 mb-2">Top Opportunity</span>}
-                                <a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a>
-                                <div className="flex justify-between mt-3 text-sm">
-                                    <div><span className="font-semibold text-slate-600">Impressions:</span> {(page.Impressions || 0).toLocaleString()}</div>
-                                    <div><span className="font-semibold text-slate-600">Clicks:</span> {(page.Clicks || 0).toLocaleString()}</div>
-                                </div>
-                                <div className="mt-4 p-3 bg-slate-50 rounded-lg">
-                                    {page.title || page.description ? (
-                                        <>
-                                            <p className="font-semibold text-sm text-slate-800">{page.title}</p>
-                                            <p className="text-xs text-slate-600 mt-1">{page.description}</p>
-                                        </>
-                                    ) : (
-                                        <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-sm text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-2">
-                                            {fetchingMetadata[page.Page] ? <><Loader size={14} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={14} /> Fetch Info </>}
-                                        </button>
-                                    )}
-                                    {!isSharedView && (
-                                        <div className="mt-2 text-right">
-                                            <button onClick={() => suggestMetaData(page)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                                {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
-                                            </button>
-                                        </div>
-                                    )}
-                                    {page.suggestedTitle && page.suggestedDescription && (
-                                        <div className="mt-3 p-2 bg-purple-50 rounded-lg border border-purple-200">
-                                            <p className="font-semibold text-xs text-purple-800">Suggested Meta:</p>
-                                            <p className="text-xs text-purple-700">Title: {page.suggestedTitle}</p>
-                                            <p className="text-xs text-purple-700">Description: {page.suggestedDescription}</p>
-                                            {page.suggestedReasoning && <p className="text-xs text-purple-600 mt-1">Reasoning: {page.suggestedReasoning}</p>}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>)}</div>
-                            <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm text-left text-slate-500"><thead className="text-xs text-slate-700 uppercase bg-slate-50"><tr><th scope="col" className="px-6 py-3 font-bold">Page & Metadata</th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Impressions')}>Impressions <ArrowUpDown size={14} className="inline ml-1"/></th><th scope="col" className="px-6 py-3 font-bold cursor-pointer" onClick={() => requestSort('Clicks')}>Clicks <ArrowUpDown size={14} className="inline ml-1"/></th><th scope="col" className="px-6 py-3 font-bold">Actions</th></tr></thead><tbody>{sortedAndFilteredPages.map((page, index) => <tr key={`${page.Page}-${index}`} className="bg-white border-b hover:bg-slate-50">
-                                <td className="px-6 py-4">
-                                    {page.isTopOpportunity && <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20 mb-1">Top Opportunity</span>}
-                                    <a href={page.Page} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline break-all">{page.Page}</a>
-                                    <div className="mt-2 p-2 bg-slate-50 rounded">
-                                        {page.title || page.description ? (
-                                            <>
-                                                <p className="font-semibold text-xs text-slate-800">{page.title}</p>
-                                                <p className="text-xs text-slate-500 mt-1">{page.description}</p>
-                                            </>
-                                        ) : (
-                                            <button onClick={() => handleFetchMetadata(page.Page, index)} disabled={fetchingMetadata[page.Page] || isSharedView} className="text-xs text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline inline-flex items-center gap-1">
-                                                {fetchingMetadata[page.Page] ? <><Loader size={12} className="animate-spin" /> Fetching...</> : <> <RefreshCw size={12} /> Fetch Info</>}
-                                            </button>
-                                        )}
-                                        {page.suggestedTitle && page.suggestedDescription && (
-                                            <div className="mt-3 p-2 bg-purple-50 rounded-lg border border-purple-200">
-                                                <p className="font-semibold text-xs text-purple-800">Suggested Meta:</p>
-                                                <p className="text-xs text-purple-700">Title: {page.suggestedTitle}</p>
-                                                <p className="text-xs text-purple-700">Description: {page.suggestedDescription}</p>
-                                                {page.suggestedReasoning && <p className="text-xs text-purple-600 mt-1">Reasoning: {page.suggestedReasoning}</p>}
-                                            </div>
-                                        )}
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4">{(page.Impressions || 0).toLocaleString()}</td>
-                                <td className="px-6 py-4">{(page.Clicks || 0).toLocaleString()}</td>
-                                <td className="px-6 py-4">
-                                    {!isSharedView && (
-                                        <button onClick={() => suggestMetaData(page)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                            {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
-                                        </button>
-                                    )}
-                                </td>
-                            </tr>)}</tbody></table></div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        </>
-    );
-};
+                                {!isSharedView && <button onClick={handleBulkFetchMetadata} disabled={isBulkFetching} className="inline-flex items-center justify- Renders the UI for the Changelog modal. 
+ * `SummaryDisplay`: Renders the UI for the performance summary. 
 
-export default App;
+The file `src/App.js` is the central component of the application, managing state, interacting with Firebase for data persistence and authentication, calling the Gemini API for AI functionalities, and rendering the user interface based on these interactions and data.
+
+### Relevant Dependencies from `package.json` 
+
+The project uses the following key dependencies:
+* `react` and `react-dom` (version `18.3.1`): For building the user interface.
+* `firebase` (version `10.12.2`): For backend services including authentication (email/password, Google Sign-In) and Firestore database (for snapshots, user settings, knowledge base content).
+* `lucide-react` (version `0.381.0`): For a collection of React icons.
+* `react-scripts` (version `5.0.1`): For development server, build processes, and testing setup (part of Create React App).
+* `papaparse` (dynamically loaded via CDN): For parsing CSV files.
+
+### Overall Application Functionality
+
+The application is an "SEO Performance Analyzer" that allows users to:
+* **Sign in/Sign Up:** Using email/password or Google authentication.
+* **Upload Google Search Console Data:** Process CSV files containing page performance metrics (Clicks, Impressions).
+* **Generate AI Summaries:** Analyze uploaded data to provide key insights, recommendations, and identify optimization opportunities using the Gemini API.
+* **Fetch Page Metadata:** Retrieve titles and descriptions for pages from their URLs.
+* **Suggest New Meta Data:** Use Gemini AI to suggest optimized SEO titles and meta descriptions for individual pages, including a reasoning for the suggestions.
+* **Knowledge Base:** Upload PDF documents, have Gemini extract text and provide summaries, with content stored in Firestore under user settings.
+* **Manage Settings:** Configure the Gemini API key and access the Knowledge Base through a dedicated settings modal with tabs.
+* **Share Snapshots:** Generate shareable, read-only links for analysis snapshots.
+* **Filter Pages:** Filter the main pages list to show only "Top Opportunities" identified by the AI summary.
+* **View Changelog:** See application updates and feature history within a dedicated modal.
+
+The project uses Tailwind CSS for styling, as indicated by `tailwind.config.js` and `postcss.config.js`. Build processes are handled by `react-scripts`.
+
+---
+**Citations:**
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/src/App.js`
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/tailwind.config.js`
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/src/index.js`
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/src/index.css`
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/postcss.config.js`
+ `caloneup/seo-refinerator/SEO-Refinerator-33aa6918d926734f8a8a009f009dd88626ce09e5/package.json`
