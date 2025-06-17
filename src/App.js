@@ -197,6 +197,9 @@ const App = () => {
     // State for Meta Data Suggestion
     const [isSuggestingMeta, setIsSuggestingMeta] = useState({}); // Stores loading state for each page by URL
     
+    // New state for filtering by Top Opportunities
+    const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
+
     const isSharedView = !!sharedSnapshotData;
     // Modified setError to also clear successMessage, and vice-versa
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
@@ -453,9 +456,12 @@ const App = () => {
         const currentActiveSnapshot = snapshots.find(s => s.id === activeSnapshotId);
         if (currentActiveSnapshot) {
             const updatedPages = [...currentActiveSnapshot.pages];
-            updatedPages[pageIndex] = { ...updatedPages[pageIndex], ...metadata };
-            const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
-            await updateDoc(snapshotDocRef, { pages: updatedPages });
+            const originalIndex = updatedPages.findIndex(p => p.Page === pageUrl); // Find original index
+            if (originalIndex !== -1) {
+                updatedPages[originalIndex] = { ...updatedPages[originalIndex], ...metadata };
+                const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
+                await updateDoc(snapshotDocRef, { pages: updatedPages });
+            }
         }
         setFetchingMetadata(prev => ({ ...prev, [pageUrl]: false }));
     };
@@ -490,10 +496,10 @@ const App = () => {
     };
 
     // --- New Function: Suggest Meta Data ---
-    const suggestMetaData = useCallback(async (page, pageIndex) => {
-        if (isSharedView || !db || !user?.uid || isSuggestingMeta[page.Page]) return;
+    const suggestMetaData = useCallback(async (pageToUpdate) => { // Changed param name from 'page' to 'pageToUpdate' for clarity
+        if (isSharedView || !db || !user?.uid || isSuggestingMeta[pageToUpdate.Page]) return; // Use pageToUpdate.Page for unique key
 
-        setIsSuggestingMeta(prev => ({ ...prev, [page.Page]: true }));
+        setIsSuggestingMeta(prev => ({ ...prev, [pageToUpdate.Page]: true }));
         setSuccessMessage('');
         setError(null);
 
@@ -507,7 +513,7 @@ const App = () => {
                 required: ["title", "description"]
             };
 
-            const metaPrompt = `Given the page URL: ${page.Page}, existing title: "${page.title || 'N/A'}", and description: "${page.description || 'N/A'}", suggest an optimized new SEO title (max 60 characters) and meta description (max 160 characters). Provide only the new title and description in the specified JSON format.`;
+            const metaPrompt = `Given the page URL: ${pageToUpdate.Page}, existing title: "${pageToUpdate.title || 'N/A'}", and description: "${pageToUpdate.description || 'N/A'}", suggest an optimized new SEO title (max 60 characters) and meta description (max 160 characters). Provide only the new title and description in the specified JSON format.`;
 
             setSuccess("Generating meta data suggestions...");
             const suggestionsJsonString = await callGemini(metaPrompt, { 
@@ -519,19 +525,26 @@ const App = () => {
             const currentActiveSnapshot = snapshots.find(s => s.id === activeSnapshotId);
             if (currentActiveSnapshot) {
                 const updatedPages = [...currentActiveSnapshot.pages];
-                updatedPages[pageIndex] = { 
-                    ...updatedPages[pageIndex], 
-                    suggestedTitle: suggestions.title, 
-                    suggestedDescription: suggestions.description 
-                };
-                const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
-                await updateDoc(snapshotDocRef, { pages: updatedPages });
-                setSuccess(`New meta data suggested for "${page.Page}"!`);
+                // Find the correct original index based on page URL
+                const originalIndex = updatedPages.findIndex(p => p.Page === pageToUpdate.Page);
+                
+                if (originalIndex !== -1) {
+                    updatedPages[originalIndex] = { 
+                        ...updatedPages[originalIndex], 
+                        suggestedTitle: suggestions.title, 
+                        suggestedDescription: suggestions.description 
+                    };
+                    const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
+                    await updateDoc(snapshotDocRef, { pages: updatedPages });
+                    setSuccess(`New meta data suggested for "${pageToUpdate.Page}"!`);
+                } else {
+                    setError(`Error: Page "${pageToUpdate.Page}" not found in active snapshot.`);
+                }
             }
         } catch (err) {
-            setError(err.message || `Error suggesting meta data for ${page.Page}.`);
+            setError(err.message || `Error suggesting meta data for ${pageToUpdate.Page}.`);
         } finally {
-            setIsSuggestingMeta(prev => ({ ...prev, [page.Page]: false }));
+            setIsSuggestingMeta(prev => ({ ...prev, [pageToUpdate.Page]: false }));
         }
     }, [isSharedView, db, user?.uid, isSuggestingMeta, activeSnapshotId, snapshots, callGemini, setError, setSuccess]);
 
@@ -546,25 +559,37 @@ const App = () => {
 
     const sortedAndFilteredPages = useMemo(() => {
         if (!activeSnapshot?.pages) return [];
-        let sorted = [...activeSnapshot.pages];
+        let filtered = [...activeSnapshot.pages];
 
         // Mark top opportunities identified by AI summary
         const opportunityPageUrls = new Set(parsedSummary?.opportunityPages?.map(p => p.page) || []);
-        sorted = sorted.map(page => ({
+        filtered = filtered.map(page => ({
             ...page,
             isTopOpportunity: opportunityPageUrls.has(page.Page)
         }));
 
+        // Apply search term filter
+        if (searchTerm) {
+            filtered = filtered.filter(p => p.Page?.toLowerCase().includes(searchTerm.toLowerCase()));
+        }
+
+        // Apply "Show only opportunities" filter
+        if (showOnlyOpportunities) {
+            filtered = filtered.filter(p => p.isTopOpportunity);
+        }
+
+        // Apply sorting
         if (sortConfig.key) {
-            sorted.sort((a, b) => {
-                const valA = a[sortConfig.key] || 0; const valB = b[sortConfig.key] || 0;
+            filtered.sort((a, b) => {
+                const valA = a[sortConfig.key] || 0; 
+                const valB = b[sortConfig.key] || 0;
                 if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
                 if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
                 return 0;
             });
         }
-        return searchTerm ? sorted.filter(p => p.Page?.toLowerCase().includes(searchTerm.toLowerCase())) : sorted;
-    }, [activeSnapshot, searchTerm, sortConfig, parsedSummary]);
+        return filtered;
+    }, [activeSnapshot, searchTerm, sortConfig, parsedSummary, showOnlyOpportunities]);
     
     const requestSort = (key) => {
         const direction = (sortConfig.key === key && sortConfig.direction === 'descending') ? 'ascending' : 'descending';
@@ -800,6 +825,17 @@ const App = () => {
                         <div className="bg-white rounded-2xl shadow-lg border overflow-hidden mt-8">
                             <div className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
                                 <div className="relative flex-grow w-full md:w-auto"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search by page URL..." onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"/></div>
+                                {/* New filter for Top Opportunities */}
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        type="checkbox" 
+                                        id="showOpportunities" 
+                                        checked={showOnlyOpportunities} 
+                                        onChange={(e) => setShowOnlyOpportunities(e.target.checked)} 
+                                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                    />
+                                    <label htmlFor="showOpportunities" className="text-sm font-medium text-slate-700">Show only Top Opportunities</label>
+                                </div>
                                 {!isSharedView && <button onClick={handleBulkFetchMetadata} disabled={isBulkFetching} className="inline-flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:bg-slate-400 w-full md:w-auto">{isBulkFetching ? <><Loader size={16} className="animate-spin" /> {`Fetching... ${bulkFetchProgress.current} of ${bulkFetchProgress.total}`}</> : <><RefreshCw size={16} /> Fetch All Metadata</>}</button>}
                             </div>
                             <div className="md:hidden">{sortedAndFilteredPages.map((page, index) => <div key={`${page.Page}-${index}`} className="border-t border-slate-200 p-4">
@@ -822,7 +858,7 @@ const App = () => {
                                     )}
                                     {!isSharedView && (
                                         <div className="mt-2 text-right">
-                                            <button onClick={() => suggestMetaData(page, index)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <button onClick={() => suggestMetaData(page)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
                                                 {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
                                             </button>
                                         </div>
@@ -864,7 +900,7 @@ const App = () => {
                                 <td className="px-6 py-4">{(page.Clicks || 0).toLocaleString()}</td>
                                 <td className="px-6 py-4">
                                     {!isSharedView && (
-                                        <button onClick={() => suggestMetaData(page, index)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <button onClick={() => suggestMetaData(page)} disabled={isSuggestingMeta[page.Page]} className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
                                             {isSuggestingMeta[page.Page] ? <Loader size={12} className="animate-spin" /> : <Wand2 size={12} />} Suggest Meta
                                         </button>
                                     )}
