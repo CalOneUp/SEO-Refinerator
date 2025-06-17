@@ -475,12 +475,11 @@ const App = () => {
             if(originalIndex !== -1) { updatedPages[originalIndex] = { ...updatedPages[originalIndex], ...metadata }; }
             await new Promise(resolve => setTimeout(resolve, 200));
         }
-        try {
+        try { // This is line 478 where the error was reported
             const snapshotDocRef = doc(db, 'users', user.uid, 'snapshots', activeSnapshotId);
             await updateDoc(snapshotDocRef, { pages: updatedPages });
             setSuccess("Successfully fetched all metadata!");
-        } <<<<<<< Updated upstream
-catch (err) {
+        } catch (err) { // Removed the merge conflict marker here
             setError("Failed to save updated metadata.");
         } finally {
             setIsBulkFetching(false);
