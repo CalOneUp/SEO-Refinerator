@@ -1,12 +1,12 @@
 {
-  "name": "seo-performance-analyzer",
-  "version": "0.1.0",
+  "name": "click-or-it-didnt-happen",
+  "version": "1.0.0",
   "private": true,
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
-    "firebase": "^10.12.2",
+    "firebase": "^10.14.1",
     "lucide-react": "^0.381.0",
     "react": "^18.3.1",
     "react-datepicker": "^6.9.0",
@@ -21,7 +21,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "CI= react-scripts build",
+    "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
