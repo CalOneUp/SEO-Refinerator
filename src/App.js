@@ -23,8 +23,7 @@ import {
     onSnapshot,
     deleteDoc,
     query,
-    where,
-    getDocs
+    where
 } from 'firebase/firestore';
 
 // --- Firebase Configuration ---
@@ -172,10 +171,7 @@ const LoggedInApp = ({ db, auth, user }) => {
     const [uiError, setUiError] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [sortConfig, setSortConfig] = useState({ key: 'Impressions', direction: 'descending' });
-    const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
-
+    
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
     const setSuccess = (msg) => { setSuccessMessage(msg); setUiError(null); };
 
@@ -390,25 +386,6 @@ const LoggedInApp = ({ db, auth, user }) => {
         return null;
     }, [activeSnapshot]);
 
-    const sortedAndFilteredPages = useMemo(() => {
-        if (!activeSnapshot?.pages) return [];
-        let filtered = [...activeSnapshot.pages];
-        const opportunityPageUrls = new Set(parsedSummary?.opportunityPages?.map(p => p.page) || []);
-        filtered = filtered.map(page => ({ ...page, isTopOpportunity: opportunityPageUrls.has(page.Page) }));
-        if (searchTerm) filtered = filtered.filter(p => p.Page?.toLowerCase().includes(searchTerm.toLowerCase()));
-        if (showOnlyOpportunities) filtered = filtered.filter(p => p.isTopOpportunity);
-        if (sortConfig.key) {
-            filtered.sort((a, b) => {
-                const valA = a[sortConfig.key] || 0;
-                const valB = b[sortConfig.key] || 0;
-                if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
-                if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
-                return 0;
-            });
-        }
-        return filtered;
-    }, [activeSnapshot, searchTerm, sortConfig, parsedSummary, showOnlyOpportunities]);
-    
     return (
         <>
             <TeamModal isOpen={isTeamModalOpen} onClose={() => setIsTeamModalOpen(false)} workspace={currentWorkspace} onInvite={handleInviteMember} />
