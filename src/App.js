@@ -109,7 +109,7 @@ const AuthScreen = ({ auth }) => {
         <div className="bg-slate-50 min-h-screen flex flex-col justify-center items-center p-4">
             <div className="w-full max-w-sm">
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-bold text-slate-900 mb-2">SEO Performance Analyzer</h1>
+                    <h1 className="text-4xl font-bold text-slate-900 mb-2">Click or It Didn't Happen</h1>
                     <p className="text-slate-600">{isSignUp ? 'Create an account to get started.' : 'Sign in to your account.'}</p>
                 </div>
                 <div className="bg-white p-8 rounded-2xl shadow-lg border">
@@ -192,7 +192,7 @@ const LoggedInApp = ({ db, auth, user }) => {
     const activeSnapshot = useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
     const error = uiError;
     
-    const [changelogItems, setChangelogItems] = useState([]); // This can be populated from a DB or be static
+    const [changelogItems, setChangelogItems] = useState([]); // Can be populated from a DB or be static
 
     // --- Workspace Initialization ---
     useEffect(() => {
@@ -240,6 +240,7 @@ const LoggedInApp = ({ db, auth, user }) => {
         const unsubExperiments = onSnapshot(query(collection(db, workspacePath, 'seoExperiments')), (snap) => setSeoExperiments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubKnowledgeBase = onSnapshot(query(collection(db, workspacePath, 'knowledgeBase')), (snap) => setKnowledgeBaseItems(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         
+        // Corrected Settings Path to point to a specific document
         const settingsRef = doc(db, workspacePath, 'settings');
         const unsubSettings = onSnapshot(settingsRef, (doc) => {
             if(doc.exists()){
@@ -450,7 +451,7 @@ const LoggedInApp = ({ db, auth, user }) => {
                                     </div>
                                 )}
                             </div>
-                            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 text-center">SEO Performance Analyzer</h1>
+                            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 text-center">Click or It Didn't Happen</h1>
                             <div className="w-52 flex justify-end items-center gap-2">
                                 {currentWorkspace && <>
                                     <button onClick={() => setIsTeamModalOpen(true)} className="p-2 hover:bg-slate-200 rounded-full" title="Manage Team"><Users size={20}/></button>
