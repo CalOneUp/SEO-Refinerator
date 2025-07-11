@@ -247,7 +247,7 @@ const LoggedInApp = ({ db, auth, user }) => {
 
     const handleSetActiveSnapshot = useCallback(async (id) => {
         if (!db || !currentWorkspaceId) return;
-        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}`, 'settings');
+        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}/settings`);
         try {
             await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true });
         } catch (err) { setError("Could not set active snapshot."); }
