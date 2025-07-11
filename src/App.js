@@ -25,7 +25,8 @@ import {
     deleteDoc,
     query,
     where,
-    getDocs
+    getDocs,
+    writeBatch
 } from 'firebase/firestore';
 
 // --- Firebase Configuration ---
@@ -235,7 +236,7 @@ const LoggedInApp = ({ db, auth, user }) => {
         }
 
         const workspacePath = `workspaces/${currentWorkspaceId}`;
-        const unsubSnapshots = onSnapshot(query(collection(db, workspacePath, 'snapshots')), (snap) => setSnapshots(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubSnapshots = onSnapshot(query(collection(db, workspacePath, 'snapshots')), (snap) => setSnapshots(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => console.error("Snapshot listener error:", err));
         const unsubExperiments = onSnapshot(query(collection(db, workspacePath, 'seoExperiments')), (snap) => setSeoExperiments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubKnowledgeBase = onSnapshot(query(collection(db, workspacePath, 'knowledgeBase')), (snap) => setKnowledgeBaseItems(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         
@@ -266,7 +267,7 @@ const LoggedInApp = ({ db, auth, user }) => {
 
     const handleSetActiveSnapshot = useCallback(async (id) => {
         if (!db || !currentWorkspaceId) return;
-        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}/settings`, 'workspaceSettings');
+        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}/settings`);
         try {
             await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true });
         } catch (err) { setError("Could not set active snapshot."); }
