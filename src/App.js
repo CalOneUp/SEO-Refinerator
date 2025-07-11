@@ -409,11 +409,6 @@ const LoggedInApp = ({ db, auth, user }) => {
         return filtered;
     }, [activeSnapshot, searchTerm, sortConfig, parsedSummary, showOnlyOpportunities]);
     
-    const requestSort = (key) => {
-        const direction = (sortConfig.key === key && sortConfig.direction === 'descending') ? 'ascending' : 'descending';
-        setSortConfig({ key, direction });
-    };
-
     return (
         <>
             <TeamModal isOpen={isTeamModalOpen} onClose={() => setIsTeamModalOpen(false)} workspace={currentWorkspace} onInvite={handleInviteMember} />
