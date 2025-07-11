@@ -204,6 +204,14 @@ const App = () => {
 
     const [changelogItems, setChangelogItems] = useState([
         {
+            id: 'v1.1.1',
+            version: '1.1.1',
+            timestamp: '2025-07-11T10:00:00.000Z',
+            changes: [
+                {type: "Bug Fix", description: "Fixed a critical build error caused by a misplaced React Hook in the Changelog modal."},
+            ]
+        },
+        {
             id: 'v1.1.0',
             version: '1.1.0',
             timestamp: '2025-07-11T09:00:00.000Z',
@@ -214,35 +222,6 @@ const App = () => {
                 {type: "Improvement", description: "Date range selector now mimics Google Search Console options for better usability."}
             ]
         },
-        {
-            id: 'v1.0.5',
-            version: '1.0.5',
-            timestamp: '2025-06-17T17:00:00.000Z',
-            changes: [
-                {type: "Bug Fix", description: "Resolved `SyntaxError: Unterminated string constant` by removing extraneous CSS code accidentally pasted into JSX."}
-            ]
-        },
-        {
-            id: 'v1.0.4', 
-            version: '1.0.4',
-            timestamp: '2025-06-17T16:50:00.000Z', 
-            changes: [
-                {type: "Bug Fix", description: "Resolved `SyntaxError: Unexpected token` due to plain text/Markdown block accidentally placed in `App.js` code."}
-            ]
-        },
-        {
-            id: 'v1.0.0', 
-            version: '1.0.0',
-            timestamp: '2025-06-17T16:30:00.000Z', 
-            changes: [
-                {type: "New Feature", description: "Core Functionality: Upload Google Search Console CSV, generate AI performance summaries, and fetch basic page metadata."},
-                {type: "New Feature", description: "User Authentication implemented (Email/Password, Google Sign-in)."},
-                {type: "New Feature", description: "Knowledge Base: Upload PDF documents directly for AI-powered summaries."},
-                {type: "New Feature", description: "Automated SEO Meta Data Suggestions with AI-generated reasoning."},
-                {type: "New Feature", description: "Top Opportunities Filter to easily identify pages for improvement."},
-                {type: "New Feature", description: "Implemented Changelog to view application updates within the app."},
-            ]
-        }
     ]);
 
     const isSharedView = !!sharedSnapshotData;
@@ -845,8 +824,10 @@ const App = () => {
     };
 
     const ChangelogModal = ({ isOpen, onClose, changelogItems }) => {
-        if (!isOpen) return null;
         const sortedChangelogItems = useMemo(() => [...changelogItems].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)), [changelogItems]);
+        
+        if (!isOpen) return null;
+
         return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
                 <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
