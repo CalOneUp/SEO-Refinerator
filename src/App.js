@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Sparkles, Loader, AlertCircle, UploadCloud, Search, ArrowUpDown, RefreshCw, Settings, Users, Copy, BarChart2, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, BookText, Wand2, History, TrendingUp, Trash2, X, ChevronsUpDown } from 'lucide-react';
+import { Sparkles, Loader, AlertCircle, UploadCloud, Settings, Users, Lightbulb, CheckSquare, LogOut, Mail, KeyRound, TrendingUp, Trash2, X } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 
 // --- Firebase Imports ---
@@ -21,12 +21,10 @@ import {
     setDoc,
     updateDoc,
     onSnapshot,
-    getDoc,
     deleteDoc,
     query,
     where,
-    getDocs,
-    writeBatch
+    getDocs
 } from 'firebase/firestore';
 
 // --- Firebase Configuration ---
@@ -163,8 +161,6 @@ const LoggedInApp = ({ db, auth, user }) => {
     // Data State
     const [snapshots, setSnapshots] = useState([]);
     const [activeSnapshotId, setActiveSnapshotId] = useState(null);
-    const [seoExperiments, setSeoExperiments] = useState([]);
-    const [knowledgeBaseItems, setKnowledgeBaseItems] = useState([]);
     const [apiKey, setApiKey] = useState(null);
 
     // UI State
@@ -172,17 +168,12 @@ const LoggedInApp = ({ db, auth, user }) => {
     const [fileToUpload, setFileToUpload] = useState(null);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
-    const [isChangelogOpen, setIsChangelogOpen] = useState(false);
     const [isManageSnapshotsOpen, setIsManageSnapshotsOpen] = useState(false);
     const [uiError, setUiError] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [fetchingMetadata, setFetchingMetadata] = useState({});
-    const [isBulkFetching, setIsBulkFetching] = useState(false);
-    const [bulkFetchProgress, setBulkFetchProgress] = useState({ current: 0, total: 0 });
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'Impressions', direction: 'descending' });
-    const [isSuggestingMeta, setIsSuggestingMeta] = useState({});
     const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
 
     const setError = (msg) => { setUiError(msg); setSuccessMessage(''); };
@@ -193,8 +184,6 @@ const LoggedInApp = ({ db, auth, user }) => {
     const activeSnapshot = useMemo(() => snapshots.find(s => s.id === activeSnapshotId), [snapshots, activeSnapshotId]);
     const error = uiError;
     
-    const [changelogItems, setChangelogItems] = useState([]); // Can be populated from a DB or be static
-
     // --- Workspace Initialization ---
     useEffect(() => {
         if (!db || !user) return;
@@ -229,8 +218,6 @@ const LoggedInApp = ({ db, auth, user }) => {
     useEffect(() => {
         if (!db || !currentWorkspaceId) {
             setSnapshots([]);
-            setSeoExperiments([]);
-            setKnowledgeBaseItems([]);
             setApiKey(null);
             setActiveSnapshotId(null);
             return;
@@ -238,8 +225,6 @@ const LoggedInApp = ({ db, auth, user }) => {
 
         const workspacePath = `workspaces/${currentWorkspaceId}`;
         const unsubSnapshots = onSnapshot(query(collection(db, workspacePath, 'snapshots')), (snap) => setSnapshots(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => console.error("Snapshot listener error:", err));
-        const unsubExperiments = onSnapshot(query(collection(db, workspacePath, 'seoExperiments')), (snap) => setSeoExperiments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-        const unsubKnowledgeBase = onSnapshot(query(collection(db, workspacePath, 'knowledgeBase')), (snap) => setKnowledgeBaseItems(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         
         const settingsRef = doc(db, workspacePath, 'settings');
         const unsubSettings = onSnapshot(settingsRef, (doc) => {
@@ -254,8 +239,6 @@ const LoggedInApp = ({ db, auth, user }) => {
         
         return () => {
             unsubSnapshots();
-            unsubExperiments();
-            unsubKnowledgeBase();
             unsubSettings();
         };
     }, [db, currentWorkspaceId]);
@@ -268,7 +251,7 @@ const LoggedInApp = ({ db, auth, user }) => {
 
     const handleSetActiveSnapshot = useCallback(async (id) => {
         if (!db || !currentWorkspaceId) return;
-        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}`, 'settings');
+        const settingsDocRef = doc(db, `workspaces/${currentWorkspaceId}/settings`);
         try {
             await setDoc(settingsDocRef, { activeSnapshotId: id }, { merge: true });
         } catch (err) { setError("Could not set active snapshot."); }
